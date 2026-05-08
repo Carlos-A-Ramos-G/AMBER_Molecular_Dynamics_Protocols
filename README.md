@@ -1,6 +1,7 @@
-# Classical-MD preparation -> NVT production (stages 00 -> 04)
+# Molecular Mechanichs Molecular Dynamics (MM MD) preparation -> NVT production (stages 00 -> 04)
 
 This is the first half of a QM/MM string-method PMF workflow.
+However, it can also be used as a standalone protocol for running MM MD production simulations.
 `run_upto_NVT.py` configures and runs stages 00 (preparation) through 04
 (NVT production) for an enzyme + inhibitor system.
 
