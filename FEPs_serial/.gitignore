@@ -33,3 +33,9 @@ ti001_*.log
 
 # dV/dλ intermediate files written by analyse.sh
 dvdl_*.dat
+
+# fep_runner.py generated output (only <system>/setup/ is source data)
+FCE_to_ACE/ligand/
+FCE_to_ACE/michaelis/
+worked/
+leap.log
