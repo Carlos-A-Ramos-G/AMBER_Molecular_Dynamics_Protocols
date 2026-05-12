@@ -494,8 +494,9 @@ def setup(cfg: dict, submit: bool = False, mode: str = "serial") -> None:
         sys_dir.mkdir(parents=True, exist_ok=True)
 
         # Symlinks to parameter files at system level
-        _symlink(Path("../setup") / sys_cfg["parameters"], sys_dir / "ti.prmtop")
-        _symlink(Path("../setup") / sys_cfg["coordinates"], sys_dir / "ti.inpcrd")
+        setup_dir = Path("../../setup_files") / system_name
+        _symlink(setup_dir / sys_cfg["parameters"], sys_dir / "ti.prmtop")
+        _symlink(setup_dir / sys_cfg["coordinates"], sys_dir / "ti.inpcrd")
 
         mask = dict(
             timask1=sys_cfg["timask1"], timask2=sys_cfg["timask2"],
@@ -521,7 +522,7 @@ def setup(cfg: dict, submit: bool = False, mode: str = "serial") -> None:
                 win_dir = sys_dir / f"replica_{replica}" / str(w_idx)
                 win_dir.mkdir(parents=True, exist_ok=True)
                 _symlink(
-                    Path("../../../setup") / sys_cfg["parameters"],
+                    Path("../../../../setup_files") / system_name / sys_cfg["parameters"],
                     win_dir / "ti.prmtop",
                 )
                 (win_dir / f"ti_{w_idx}.in").write_text(

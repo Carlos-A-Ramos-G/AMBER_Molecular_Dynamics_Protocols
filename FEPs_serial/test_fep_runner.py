@@ -2,10 +2,7 @@
 Tests for fep_runner.py — local mode.
 
 Runs `setup --mode local` in a temp directory and validates the generated
-AMBER TI input files against the reference inputs in worked/.
-
-The worked/ folder is the ground truth for the michaelis arm: all nine
-lambda windows must match on masks, clambda, and key simulation parameters.
+AMBER TI input files against expected values from config.yaml.
 """
 
 import re
@@ -18,8 +15,15 @@ import numpy as np
 import pytest
 
 REPO_DIR = Path(__file__).parent
-WORKED_DIR = REPO_DIR / "worked"
 N_WINDOWS = 9
+
+# Expected michaelis alchemical masks (from config.yaml FCE_to_ACE example).
+MICHAELIS_MASKS = {
+    "timask1": "':608-611'",
+    "timask2": "':612-615'",
+    "scmask1": "'@9292-9294'",
+    "scmask2": "'@9358,9360,9361'",
+}
 
 # 9-point Gauss-Legendre nodes mapped to [0, 1], sorted ascending.
 _nodes, _ = np.polynomial.legendre.leggauss(N_WINDOWS)
@@ -83,28 +87,20 @@ def test_michaelis_lambda_matches_gl_quadrature(generated, window):
 
 
 # ---------------------------------------------------------------------------
-# Masks — michaelis vs worked/ reference
+# Masks — michaelis
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("window", range(1, N_WINDOWS + 1))
 @pytest.mark.parametrize("mask_key", ["timask1", "timask2", "scmask1", "scmask2"])
-def test_michaelis_masks_match_worked_reference(generated, window, mask_key):
-    """Alchemical masks must match the reference inputs in worked/."""
-    gen_path = (
+def test_michaelis_masks(generated, window, mask_key):
+    """Alchemical masks must match the expected values from config.yaml."""
+    ti = (
         generated / "FCE_to_ACE" / "michaelis" / "replica_1" / str(window) / f"ti_{window}.in"
     )
-    ref_path = WORKED_DIR / str(window) / f"ti_{window}.in"
-
-    assert gen_path.exists(), f"Generated file missing: {gen_path}"
-    assert ref_path.exists(), f"Reference file missing: {ref_path}"
-
-    gen_val = _extract_param(gen_path.read_text(), mask_key)
-    ref_val = _extract_param(ref_path.read_text(), mask_key)
-
-    assert gen_val == ref_val, (
-        f"Window {window} [{mask_key}] mismatch:\n"
-        f"  generated : {gen_val}\n"
-        f"  reference : {ref_val}"
+    assert ti.exists(), f"Missing: {ti}"
+    val = _extract_param(ti.read_text(), mask_key)
+    assert val == MICHAELIS_MASKS[mask_key], (
+        f"Window {window} [{mask_key}]: got {val!r}, expected {MICHAELIS_MASKS[mask_key]!r}"
     )
 
 
