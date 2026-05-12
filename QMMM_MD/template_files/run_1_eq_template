@@ -6,14 +6,15 @@
 #SBATCH --cpus-per-task=1
 
 hostname
-srun numactl -s
+srun numactl -s   # remove if numactl is unavailable on your cluster
 
-module load PrgEnv-gnu/8.5.0
+# ── Adapt to your HPC environment ─────────────────────────────────────────────
+module load PrgEnv-gnu/8.5.0   # replace with your environment module
+source ~/.local/amber.sh        # replace with your AMBER setup script
 
-source ~/.local/amber.sh
-
-export MPICH_NO_BUFFER_ALIAS_CHECK=1
-export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
+export MPICH_NO_BUFFER_ALIAS_CHECK=1      # Cray/MPICH — remove for other MPI
+export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK   # Cray — remove for other MPI
+# ──────────────────────────────────────────────────────────────────────────────
 
 srun --cpu-bind=cores sander.MPI -O -i in -o 0.out -c GEOM -r 0.rst7 -x 0.nc -inf 0.mdinfo -p PARM
 

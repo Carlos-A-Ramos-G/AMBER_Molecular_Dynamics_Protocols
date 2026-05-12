@@ -28,7 +28,8 @@ atom3=617
 
 # Scan parameters
 coor0=2.9       # starting coordinate value (Å) for window 1
-windows=30      # number of umbrella sampling windows (step size: 0.1 Å)
+windows=30      # number of umbrella sampling windows
+scan_step=0.1   # step size in Å per window (use negative for a reverse scan)
 # ─────────────────────────────────────────────────────────────────────────────
 
 restr_template="restr_template"
@@ -37,7 +38,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 templates="$DIR/template_files"
 
 # ─── VALIDATION ──────────────────────────────────────────────────────────────
-for var in parm geom scheme qlevel eecut qmmask qcharge atom1 atom2 atom3 coor0 windows; do
+for var in parm geom scheme qlevel eecut qmmask qcharge atom1 atom2 atom3 coor0 windows scan_step; do
     if [ -z "${!var}" ]; then
         echo "ERROR: '\$$var' is not set" >&2; exit 1
     fi
@@ -102,8 +103,7 @@ apply_qm_sel "$templates/in_1_eq_free_template" "$folder_stage/in"
 for stage in 06_scan_umbrella_sampling 07_PMF_umbrella_sampling; do
     folder_stage="$DIR/$stage"
     for window in $(seq 1 "$windows"); do
-        # Scan in +0.1 Å steps from coor0; negate the step for a reverse scan
-        val=$(echo "scale=1; $coor0 + ($window - 1.0)/10.0" | bc -l)
+        val=$(echo "scale=1; $coor0 + ($window - 1) * $scan_step" | bc -l)
         vali=$(echo "scale=1; ($val - 10)" | bc -l)
         valf=$(echo "scale=1; ($val + 10)" | bc -l)
         echo "  $folder_stage  window $window  coord=$val"
