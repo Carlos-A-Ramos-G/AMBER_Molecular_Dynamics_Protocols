@@ -1,0 +1,251 @@
+# FEP Serial — AMBER Thermodynamic Integration workflow
+
+A Python workflow manager for alchemical free-energy perturbation (FEP) calculations
+using AMBER thermodynamic integration (TI) with Gauss-Legendre quadrature.
+Supports three execution modes: **local** (single-GPU workstation), **serial** (SLURM,
+one job at a time), and **parallel** (SLURM, all replicas simultaneously).
+
+---
+
+## Prerequisites
+
+| Requirement | Version |
+|---|---|
+| Python | ≥ 3.8 |
+| numpy | any recent |
+| pyyaml | any recent |
+| AMBER | ≥ 20 (pmemd.cuda + cpptraj) |
+| SLURM | only for `serial` / `parallel` modes |
+
+Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Quick start
+
+```bash
+# 1. Edit config.yaml for your mutation
+#    (system name, masks, topology file names, simulation parameters)
+
+# 2. Generate all input files
+python fep_runner.py setup --mode local
+
+# 3. Run both legs sequentially in the background
+python fep_runner.py setup --mode local --submit
+
+# 4. After completion, compute ΔΔG
+python fep_runner.py analyse
+```
+
+---
+
+## Repository layout
+
+```
+FEPs_serial/
+├── fep_runner.py                       # main workflow script
+├── config.yaml                         # the ONE file you edit per mutation
+├── requirements.txt
+├── test_fep_runner.py                  # pytest validation suite
+├── analyse.sh                          # thin wrapper for `fep_runner.py analyse`
+├── clean.sh                            # remove generated files from a system dir
+├── FEP_gaussian_quadrature_integrator.py  # legacy standalone integrator
+├── worked/                             # reference TI inputs (9-window example)
+│   └── {1..9}/ti_{n}.in
+└── FCE_to_ACE/                         # example: fluorocitrate → acetate mutation
+    ├── setup/                          # AMBER topology + coordinate files
+    │   ├── ligands_solvated.prmtop / .inpcrd / .pdb
+    │   ├── complex_solvated.prmtop / .inpcrd / .pdb
+    │   ├── *.prepin, *.frcmod          # ligand force-field parameters
+    │   └── 1_leap_solvated.sh          # LEaP script used to build topologies
+    ├── ligand/                         # free-leg (ligand in solvent)
+    │   ├── min.in, equil.in
+    │   ├── run_local.sh
+    │   └── replica_1/{1..9}/ti_{n}.in
+    └── michaelis/                      # bound-leg (complex in solvent)
+        ├── min.in, equil.in
+        ├── run_local.sh
+        └── replica_1/{1..9}/ti_{n}.in
+```
+
+---
+
+## Configuring a new mutation
+
+Edit **`config.yaml`** — it is the only file you need to touch between mutations.
+
+```yaml
+system_name: FCE_to_ACE   # top-level directory for this mutation
+
+n_lambdas: 9              # Gauss-Legendre lambda windows (>= 3; common: 5, 9, 12)
+replicates: 1             # independent replicas
+
+amber:
+  cuda_module: amber/20_cuda_rhel8  # SLURM module for GPU runs
+  cpu_module:  amber/20             # SLURM module for CPU equilibration
+
+slurm:
+  gpu:
+    ntasks: 1
+    gres: gpu:1
+    partition: penelope
+    qos: penelope
+  cpu:
+    ntasks: 4             # must match -n passed to srun pmemd.MPI
+
+simulation:
+  min:
+    maxcyc: 10000
+  equil:
+    nstlim: 200000
+    dt: 0.001
+    ntwx: 1000
+  prod:
+    nstlim: 5000000
+    dt: 0.001
+    ntwe: 1000
+    ntwx: 10000
+
+systems:
+  ligand:
+    parameters:  ligands_solvated.prmtop
+    coordinates: ligands_solvated.inpcrd
+    timask1: "':1-4'"
+    timask2: "':5-8'"
+    scmask1: "'@54-65'"
+    scmask2: "'@121-135'"
+    resnew: DCN
+
+  michaelis:
+    parameters:  complex_solvated.prmtop
+    coordinates: complex_solvated.inpcrd
+    timask1: "':608-611'"
+    timask2: "':612-615'"
+    scmask1: "'@9292-9294'"
+    scmask2: "'@9358,9360,9361'"
+    resnew: DCN
+```
+
+Place the topology (`.prmtop`) and coordinate (`.inpcrd`) files for both the
+ligand-only and the complex systems inside `<system_name>/setup/`.
+
+---
+
+## Execution modes
+
+### local — single-GPU workstation
+
+```bash
+# Generate input files
+python fep_runner.py setup --mode local
+
+# Launch (both legs chain sequentially in background)
+python fep_runner.py setup --mode local --submit
+
+# Monitor
+tail -f FCE_to_ACE/ligand/run.log
+tail -f FCE_to_ACE/michaelis/run.log
+```
+
+The legs run one after the other (ligand first, then michaelis) so the GPU
+is never double-booked. Each `run_local.sh` runs minimisation → equilibration
+→ all production windows in the order: mid → mid-1 → … → 1 → mid+1 → … → N.
+
+### serial — SLURM, one job at a time
+
+```bash
+python fep_runner.py setup --mode serial --submit
+```
+
+Jobs chain via `sbatch` dependencies: equil → window-mid → mid-1 → … → 1 →
+mid+1 → … → N. Replicas are chained end-to-end (replica 2 starts when
+replica 1's last window finishes).
+
+### parallel — SLURM, all replicas simultaneously
+
+```bash
+python fep_runner.py setup --mode parallel --submit
+```
+
+After equilibration, every replica's central window is submitted at once.
+Within each replica the windows fan out bidirectionally:
+```
+1 ← 2 ← 3 ← 4 ← 5 → 6 → 7 → 8 → 9
+```
+
+---
+
+## Analysis
+
+```bash
+python fep_runner.py analyse            # uses last 4000 dV/dλ records
+python fep_runner.py analyse --tail 2000
+bash analyse.sh --tail 2000             # identical — thin wrapper
+```
+
+Reads all `ti001_{n}.en` energy files, extracts dV/dλ (L9 records), computes
+per-replica ΔG via Gauss-Legendre quadrature, and prints:
+
+```
+ΔΔG = ΔG(michaelis) − ΔG(ligand)
+ΔΔG = +X.XXX ± X.XXX kcal/mol
+```
+
+---
+
+## Testing
+
+```bash
+python -m pytest test_fep_runner.py -v
+```
+
+The suite (89 tests) runs `setup --mode local` in a temporary directory and
+validates that the generated inputs match the reference files in `worked/`:
+
+- GL lambda values for all 9 windows
+- All four alchemical masks (`timask1/2`, `scmask1/2`) against `worked/`
+- Simulation parameters (`nstlim`, `dt`, `ntwe`, `ntwx`)
+- `run_local.sh` generated and executable for both legs
+- Ligand masks not contaminated by michaelis values
+
+---
+
+## Utilities
+
+### clean.sh
+
+Remove all files generated by `fep_runner.py setup` and any AMBER simulation
+outputs, reading the system name and legs from `config.yaml`:
+
+```bash
+bash clean.sh            # interactive confirmation
+bash clean.sh --dry-run  # preview only
+bash clean.sh --yes      # skip confirmation
+```
+
+### fep_runner.py — full CLI reference
+
+```
+python fep_runner.py [--config FILE] setup   [--mode {local,serial,parallel}] [--submit]
+python fep_runner.py [--config FILE] analyse [--tail N]
+```
+
+---
+
+## Lambda windows (9-point Gauss-Legendre)
+
+| Window | λ | weight |
+|--------|---------|--------|
+| 1 | 0.01592 | 0.04064 |
+| 2 | 0.08198 | 0.09032 |
+| 3 | 0.19331 | 0.13031 |
+| 4 | 0.33787 | 0.15617 |
+| 5 | 0.50000 | 0.16512 |
+| 6 | 0.66213 | 0.15617 |
+| 7 | 0.80669 | 0.13031 |
+| 8 | 0.91802 | 0.09032 |
+| 9 | 0.98408 | 0.04064 |

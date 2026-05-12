@@ -1,0 +1,35 @@
+# macOS metadata
+._*
+.DS_Store
+
+# Editor temporaries
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Claude Code settings
+.claude/
+
+# AMBER simulation outputs — *.in input files are always tracked
+*.nc
+*.out
+*.info
+*.en
+*.rst
+*.rst7
+equil.rst7.*
+run.log
+mpi_*.out
+mpi_*.err
+min.log
+equil.log
+ti001_*.log
+
+# dV/dλ intermediate files written by analyse.sh
+dvdl_*.dat
