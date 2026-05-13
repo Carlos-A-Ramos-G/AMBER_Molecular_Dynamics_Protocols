@@ -15,7 +15,7 @@ def read_pmf_error(path: Path) -> tuple:
     rc, mean, std = [], [], []
     with open(path) as fh:
         for line in fh:
-            if line.startswith("#") or not line.strip():
+            if line.strip().startswith("#") or not line.strip():
                 continue
             parts = line.split()
             rc.append(float(parts[0]))
