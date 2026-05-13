@@ -143,8 +143,13 @@ def parse_pmf(path: Path) -> tuple:
 # ── Normalization and averaging ────────────────────────────────────────────────
 
 def find_norm_index(all_energies: list) -> int:
-    """Index of the RC bin that is the minimum most often across all profiles."""
-    min_indices = [e.index(min(e)) for e in all_energies]
+    """Index of the first local minimum in the reactant region (low RC end).
+
+    Searches only the lower half of the RC range so the reference point is
+    always anchored in the reactant state, never pulled toward the product.
+    """
+    half = len(all_energies[0]) // 2
+    min_indices = [e.index(min(e[:half])) for e in all_energies]
     return Counter(min_indices).most_common(1)[0][0]
 
 
