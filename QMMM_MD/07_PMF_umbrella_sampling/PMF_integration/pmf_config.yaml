@@ -19,6 +19,9 @@ wham_tol: 0.0001        # convergence tolerance
 temperature: 310        # simulation temperature (K)
 wham_numpad: 0          # histogram padding (0 = none)
 
+# ── Error estimation (2_PMF_error.py) ────────────────────────────────────────
+error_chunks: 20        # number of equal data blocks per window for block averaging
+
 # ── Output file names ─────────────────────────────────────────────────────────
 meta_file: "meta.dat"
 pmf_output: "PMF_final"
