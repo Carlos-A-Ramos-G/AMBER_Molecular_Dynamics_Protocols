@@ -19,3 +19,6 @@
 
 # IDE / tool files
 .claude/
+
+# macOS metadata
+.DS_Store
