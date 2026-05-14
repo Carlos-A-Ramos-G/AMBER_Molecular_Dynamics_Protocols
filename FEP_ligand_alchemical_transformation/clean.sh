@@ -32,11 +32,13 @@ if [[ ! -f "$CONFIG" ]]; then
     exit 1
 fi
 
-SYSTEM_NAME=$(awk -F':[[:space:]]*' '/^system_name:/{gsub(/[[:space:]]+$/, "", $2); print $2; exit}' "$CONFIG")
-if [[ -z "$SYSTEM_NAME" ]]; then
-    echo "ERROR: could not read system_name from $CONFIG"
+RESNEW=$(awk -F':[[:space:]]*' '/^resnew:/{gsub(/[[:space:]]+$/, "", $2); print $2; exit}' "$CONFIG")
+RESOLD=$(awk -F':[[:space:]]*' '/^resold:/{gsub(/[[:space:]]+$/, "", $2); print $2; exit}' "$CONFIG")
+if [[ -z "$RESNEW" || -z "$RESOLD" ]]; then
+    echo "ERROR: could not read resnew/resold from $CONFIG"
     exit 1
 fi
+SYSTEM_NAME="${RESNEW}_to_${RESOLD}"
 
 # Extract top-level keys under the 'systems:' block (exactly 2-space indent).
 # read -ra works in bash 3.2+; awk output is joined on one line for word-split.
@@ -57,19 +59,15 @@ fi
 # All named files at the system-directory level (generated + original templates)
 SETUP_FILES=(
     min.in equil.in
-    ti.prmtop ti.inpcrd
+    ti.parm7 ti.rst7
     FEP_MIN.cmd FEP_EQUIL.cmd
     run_local.sh
-    FEP_MIN FEP_CPU_equil
-    FEP_GPU1 FEP_GPU2to4 FEP_GPU5 FEP_GPU6to8 FEP_GPU9
-    equil min prod
-    setup.sh
 )
 
 # Simulation outputs that AMBER / cpptraj write at the system-directory level
 SIM_FILES=(
-    min.out min.info min.en min.rst min.log
-    equil.out equil.info equil.en equil.rst equil.nc equil.log equil.rst
+    min.out min.info min.en min.rst7 min.log
+    equil.out equil.info equil.en equil.rst7 equil.nc equil.log
     run.log
 )
 
