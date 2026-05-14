@@ -164,7 +164,7 @@ def _gen_min_cmd(resnew: str, sys_label: str, cfg: dict) -> str:
     mods = _module_block(cfg["amber"]["cuda_module"])
     return "\n".join([
         header, mods,
-        "srun $AMBERHOME/bin/pmemd.cuda -i min.in -c ti.inpcrd -p ti.prmtop -O \\",
+        "srun $AMBERHOME/bin/pmemd.cuda -i min.in -c ti.rst7 -p ti.parm7 -O \\",
         "    -o min.out -inf min.info -e min.en -r min.rst7 -l min.log",
         "",
         "sbatch FEP_EQUIL.cmd",
@@ -187,7 +187,7 @@ def _gen_equil_cmd(resnew: str, sys_label: str, n_replicas: int,
     lines = [
         header, mods,
         f"srun -n {n_tasks} $AMBERHOME/bin/pmemd.MPI -O \\",
-        "    -i equil.in -c min.rst7 -p ti.prmtop \\",
+        "    -i equil.in -c min.rst7 -p ti.parm7 \\",
         "    -o equil.out -inf equil.info -e equil.en \\",
         "    -r equil.rst7 -x equil.nc -l equil.log",
         "",
@@ -199,7 +199,7 @@ def _gen_equil_cmd(resnew: str, sys_label: str, n_replicas: int,
         frame = start + (r - 1) * step if n_replicas > 1 else end
         lines += [
             f"cpptraj <<_EOF",
-            "parm ti.prmtop",
+            "parm ti.parm7",
             f"trajin equil.nc {frame} {frame} 1",
             f"trajout equil.rst7.{r} restart",
             "_EOF",
@@ -302,7 +302,7 @@ def _gen_prod_cmd(window: int, replica: int, n_windows: int, n_replicas: int,
 
     lines = [
         header, mods,
-        f"srun $AMBERHOME/bin/pmemd.cuda -i ti_{window}.in -c {coords} -p ti.prmtop -O \\",
+        f"srun $AMBERHOME/bin/pmemd.cuda -i ti_{window}.in -c {coords} -p ti.parm7 -O \\",
         f"    -o ti{replica}_{window}.out -inf ti{replica}_{window}.info -e ti{replica}_{window}.en \\",
         f"    -r ti{replica}_{window}.rst7 -x ti{replica}_{window}.nc -l ti{replica}_{window}.log",
         "",
@@ -381,12 +381,12 @@ def _gen_local_script(sys_label: str, n_windows: int, n_replicas: int,
         "",
         "# ---- Minimisation ------------------------------------------------",
         'log "Minimisation"',
-        '$AMBER -i min.in -c ti.inpcrd -p ti.prmtop -O \\',
+        '$AMBER -i min.in -c ti.rst7 -p ti.parm7 -O \\',
         '    -o min.out -inf min.info -e min.en -r min.rst7 -l min.log',
         "",
         "# ---- Equilibration (CPU — avoids MC-barostat runaway with TI on GPU) ---",
         'log "Equilibration"',
-        '$CPU_AMBER -i equil.in -c min.rst7 -p ti.prmtop -O \\',
+        '$CPU_AMBER -i equil.in -c min.rst7 -p ti.parm7 -O \\',
         '    -o equil.out -inf equil.info -e equil.en \\',
         '    -r equil.rst7 -x equil.nc -l equil.log',
         "",
@@ -397,7 +397,7 @@ def _gen_local_script(sys_label: str, n_windows: int, n_replicas: int,
         frame = start + (r - 1) * step if n_replicas > 1 else end
         L += [
             '$CPPTRAJ <<_EOF',
-            "parm ti.prmtop",
+            "parm ti.parm7",
             f"trajin equil.nc {frame} {frame} 1",
             f"trajout equil.rst7.{r} restart",
             "_EOF",
@@ -423,7 +423,7 @@ def _gen_local_script(sys_label: str, n_windows: int, n_replicas: int,
             L += [
                 f'log "  Window {window}/{n_windows}  lambda={clambda:.5f}"',
                 f'cd "$SYSDIR/replica_{replica}/{window}"',
-                f'$AMBER -i ti_{window}.in -c {coords} -p ti.prmtop -O \\',
+                f'$AMBER -i ti_{window}.in -c {coords} -p ti.parm7 -O \\',
                 f'    -o ti{replica}_{window}.out -inf ti{replica}_{window}.info \\',
                 f'    -e ti{replica}_{window}.en   -r ti{replica}_{window}.rst7 \\',
                 f'    -x ti{replica}_{window}.nc   -l ti{replica}_{window}.log',
@@ -483,8 +483,8 @@ def setup(cfg: dict, submit: bool = False, mode: str = "serial") -> None:
 
         # Symlinks to parameter files at system level
         setup_dir = Path("../../setup_files") / system_name
-        _symlink(setup_dir / sys_cfg["parameters"], sys_dir / "ti.prmtop")
-        _symlink(setup_dir / sys_cfg["coordinates"], sys_dir / "ti.inpcrd")
+        _symlink(setup_dir / sys_cfg["parameters"], sys_dir / "ti.parm7")
+        _symlink(setup_dir / sys_cfg["coordinates"], sys_dir / "ti.rst7")
 
         mask = dict(
             timask1=sys_cfg["timask1"], timask2=sys_cfg["timask2"],
@@ -511,7 +511,7 @@ def setup(cfg: dict, submit: bool = False, mode: str = "serial") -> None:
                 win_dir.mkdir(parents=True, exist_ok=True)
                 _symlink(
                     Path("../../../../setup_files") / system_name / sys_cfg["parameters"],
-                    win_dir / "ti.prmtop",
+                    win_dir / "ti.parm7",
                 )
                 (win_dir / f"ti_{w_idx}.in").write_text(
                     _PROD_TEMPLATE.format(

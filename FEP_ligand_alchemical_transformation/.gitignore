@@ -31,11 +31,13 @@ min.log
 equil.log
 ti001_*.log
 
+# Keep topology/coordinate files under setup_files/ regardless of extension
+!setup_files/**/*.rst7
+!setup_files/**/*.parm7
+
 # dV/dλ intermediate files written by analyse.sh
 dvdl_*.dat
 
-# fep_runner.py generated output (only <system>/setup/ is source data)
-FCE_to_ACE/ligand/
-FCE_to_ACE/michaelis/
+# fep_runner.py generated output (setup_files/ is the only source data)
 worked/
 leap.log
