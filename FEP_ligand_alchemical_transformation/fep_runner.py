@@ -4,8 +4,15 @@ FEP Gaussian Quadrature workflow manager for AMBER TI calculations.
 
 Commands
 --------
-  python fep_runner.py setup [--mode MODE] [--submit]
+  python fep_runner.py setup   [--mode MODE] [--submit]
+  python fep_runner.py submit  [--mode MODE]
   python fep_runner.py analyse [--tail N]
+
+  setup   Generate all input and job scripts.  Pass --submit to also launch
+          FEP_MIN.cmd immediately after generation.
+  submit  Submit existing job scripts (FEP_MIN.cmd / run_local.sh) without
+          regenerating any files.  Use this after manually editing scripts.
+          --mode must match the mode used during setup.
 
 Modes
 -----
@@ -134,9 +141,9 @@ def _sbatch_header(job_name: str, resources: dict) -> str:
         "#SBATCH --error=mpi_%j.err",
         f"#SBATCH --ntasks={resources['ntasks']}",
     ]
-    for key in ("gres", "partition", "qos"):
-        if key in resources:
-            lines.append(f"#SBATCH --{key}={resources[key]}")
+    for key, value in resources.items():
+        if key != "ntasks":
+            lines.append(f"#SBATCH --{key}={value}")
     return "\n".join(lines)
 
 
@@ -162,9 +169,10 @@ def _equil_cpptraj_params(cfg: dict, n_replicas: int) -> tuple[int, int, int]:
 def _gen_min_cmd(resnew: str, sys_label: str, cfg: dict) -> str:
     header = _sbatch_header(f"{resnew}-min-{sys_label}", cfg["slurm"]["gpu"])
     mods = _module_block(cfg["amber"]["cuda_module"])
+    gpu_cmd = cfg["execution_command"]["gpu"]
     return "\n".join([
         header, mods,
-        "srun $AMBERHOME/bin/pmemd.cuda -i min.in -c ti.rst7 -p ti.parm7 -O \\",
+        f"{gpu_cmd} -i min.in -c ti.rst7 -p ti.parm7 -O \\",
         "    -o min.out -inf min.info -e min.en -r min.rst7 -l min.log",
         "",
         "sbatch FEP_EQUIL.cmd",
@@ -184,9 +192,10 @@ def _gen_equil_cmd(resnew: str, sys_label: str, n_replicas: int,
     mods = _module_block(cfg["amber"]["cpu_module"])
     start, end, step = _equil_cpptraj_params(cfg, n_replicas)
 
+    cpu_cmd = cfg["execution_command"]["cpu"].format(ntasks=n_tasks)
     lines = [
         header, mods,
-        f"srun -n {n_tasks} $AMBERHOME/bin/pmemd.MPI -O \\",
+        f"{cpu_cmd} -O \\",
         "    -i equil.in -c min.rst7 -p ti.parm7 \\",
         "    -o equil.out -inf equil.info -e equil.en \\",
         "    -r equil.rst7 -x equil.nc -l equil.log",
@@ -299,10 +308,11 @@ def _gen_prod_cmd(window: int, replica: int, n_windows: int, n_replicas: int,
     job_name = f"{resnew}_R{replica}.{window}-{sys_label}"
     header = _sbatch_header(job_name, cfg["slurm"]["gpu"])
     mods = _module_block(cfg["amber"]["cuda_module"])
+    gpu_cmd = cfg["execution_command"]["gpu"]
 
     lines = [
         header, mods,
-        f"srun $AMBERHOME/bin/pmemd.cuda -i ti_{window}.in -c {coords} -p ti.parm7 -O \\",
+        f"{gpu_cmd} -i ti_{window}.in -c {coords} -p ti.parm7 -O \\",
         f"    -o ti{replica}_{window}.out -inf ti{replica}_{window}.info -e ti{replica}_{window}.en \\",
         f"    -r ti{replica}_{window}.rst7 -x ti{replica}_{window}.nc -l ti{replica}_{window}.log",
         "",
@@ -551,48 +561,63 @@ def setup(cfg: dict, submit: bool = False, mode: str = "serial") -> None:
     print(f"\nSetup complete ({mode} mode).")
 
     if submit:
-        if mode == "local":
-            # Build an ordered list of (script, log) pairs from config["systems"].
-            # Legs are chained with && so a single GPU is never double-booked:
-            # leg 1 must finish before leg 2 starts.
-            pairs = [
-                (
-                    (base / sl / "run_local.sh").resolve(),
-                    (base / sl / "run.log").resolve(),
-                )
-                for sl in cfg["systems"]
-            ]
-            chain = " && ".join(
-                f"bash {script} > {log} 2>&1" for script, log in pairs
-            )
-            proc = subprocess.Popen(
-                chain,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            print(f"\nAll legs launched in background (chain PID {proc.pid}).")
-            for sl, (_, log) in zip(cfg["systems"], pairs):
-                print(f"  [{sl}] log → {log}")
-            print(f"\n  Monitor : tail -f <log>")
-            print(f"  Stop    : kill {proc.pid}")
-        else:
-            for sys_label in cfg["systems"]:
-                sys_dir = base / sys_label
-                result = subprocess.run(
-                    ["sbatch", "FEP_MIN.cmd"],
-                    capture_output=True, text=True, cwd=sys_dir,
-                )
-                if result.returncode == 0:
-                    print(f"  [{sys_label}] {result.stdout.strip()}")
-                else:
-                    print(f"  [{sys_label}] sbatch failed: {result.stderr.strip()}",
-                          file=sys.stderr)
+        _submit(cfg, mode)
 
 
 # =============================================================================
-# Analysis command (unchanged)
+# Submit command
+# =============================================================================
+
+def _submit(cfg: dict, mode: str) -> None:
+    """Submit existing job scripts without regenerating any files."""
+    system_name = f"{cfg['resnew']}_to_{cfg['resold']}"
+    base = Path(system_name)
+
+    if mode == "local":
+        pairs = [
+            (
+                (base / sl / "run_local.sh").resolve(),
+                (base / sl / "run.log").resolve(),
+            )
+            for sl in cfg["systems"]
+        ]
+        for script, _ in pairs:
+            if not script.exists():
+                sys.exit(f"Script not found: {script}\nRun 'setup --mode local' first.")
+        chain = " && ".join(
+            f"bash {script} > {log} 2>&1" for script, log in pairs
+        )
+        proc = subprocess.Popen(
+            chain,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        print(f"\nAll legs launched in background (chain PID {proc.pid}).")
+        for sl, (_, log) in zip(cfg["systems"], pairs):
+            print(f"  [{sl}] log → {log}")
+        print(f"\n  Monitor : tail -f <log>")
+        print(f"  Stop    : kill {proc.pid}")
+    else:
+        for sys_label in cfg["systems"]:
+            sys_dir = base / sys_label
+            cmd_file = sys_dir / "FEP_MIN.cmd"
+            if not cmd_file.exists():
+                sys.exit(f"Script not found: {cmd_file}\nRun 'setup' first.")
+            result = subprocess.run(
+                ["sbatch", "FEP_MIN.cmd"],
+                capture_output=True, text=True, cwd=sys_dir,
+            )
+            if result.returncode == 0:
+                print(f"  [{sys_label}] {result.stdout.strip()}")
+            else:
+                print(f"  [{sys_label}] sbatch failed: {result.stderr.strip()}",
+                      file=sys.stderr)
+
+
+# =============================================================================
+# Analysis command
 # =============================================================================
 
 def _extract_dvdl(en_file: Path, tail_lines: int) -> np.ndarray:
@@ -707,6 +732,16 @@ def main() -> None:
         help="Submit FEP_MIN.cmd (cluster) or print run instructions (local)",
     )
 
+    p_submit = sub.add_parser(
+        "submit",
+        help="Submit existing job scripts without regenerating files",
+    )
+    p_submit.add_argument(
+        "--mode", default="serial",
+        choices=["serial", "parallel", "local"],
+        help="Must match the mode used during setup (default: serial)",
+    )
+
     p_analyse = sub.add_parser("analyse", help="Extract dV/dλ and compute ΔΔG")
     p_analyse.add_argument(
         "--tail", type=int, default=4000, metavar="N",
@@ -724,6 +759,8 @@ def main() -> None:
 
     if args.command == "setup":
         setup(cfg, submit=args.submit, mode=args.mode)
+    elif args.command == "submit":
+        _submit(cfg, mode=args.mode)
     elif args.command == "analyse":
         analyse(cfg, tail_lines=args.tail)
 
