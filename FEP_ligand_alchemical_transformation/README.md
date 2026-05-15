@@ -5,6 +5,57 @@ using AMBER thermodynamic integration (TI) with Gauss-Legendre quadrature.
 Supports three execution modes: **local** (single-GPU workstation), **serial** (SLURM,
 one job at a time), and **parallel** (SLURM, all replicas simultaneously).
 
+## Example system: LCN → ACN
+
+```
+================================================================================
+  FEP THERMODYNAMIC INTEGRATION: FCE-LTL-GQU-LCN  -->  FCE-LTL-GQU-ACN
+================================================================================
+
+      F3C                                     F3C
+        \                                      \
+         C=O                                    C=O
+         |                                      |
+        HN                                     HN
+         |                                      |
+     tBu-CH                                 tBu-CH
+          \                                     \
+           C=O                                   C=O
+           |                                     |
+           N--[bicycle]         FEP/TI           N--[bicycle]
+           |            ──────────────►          |
+           C=O               (DeltaDeltaG)       C=O
+           |                                     |
+          NH                                    NH
+           |                                     |
+          CH--CH2                               CH--CH3   <-- MUTATION
+           |       \                             |
+          C=N    O=C--CH2                       C=N
+                 |       |
+                 NH------/
+              (lactam ring)
+
+  FCE-LTL-GQU-LCN                        FCE-LTL-GQU-ACN
+
+--------------------------------------------------------------------------------
+  MUTATION SITE:
+
+  LCN:  ...NH-CH(CN)-CH2-C(=O)-NH-CH2...   <- 5-membered lactam (covalent)
+                          |______________|
+                            lactam ring
+
+  ACN:  ...NH-CH(CN)-CH3                   <- methyl (non-covalent)
+
+--------------------------------------------------------------------------------
+  UNCHANGED SCAFFOLD:
+  F3C-C(=O)-NH -- tBu-CH -- C(=O)-N-[GQU bicycle] -- C(=O)-NH -- CH(CN)
+
+================================================================================
+  LCN = lactam alpha-aminonitrile (covalent warhead)
+  ACN = alpha-methylcyanamide (non-covalent probe)
+================================================================================
+```
+
 ---
 
 ## Prerequisites
@@ -34,10 +85,12 @@ pip install -r requirements.txt
 # 2. Generate all input files
 python fep_runner.py setup --mode local
 
-# 3. Run both legs sequentially in the background
-python fep_runner.py setup --mode local --submit
+# 3. (optional) edit the generated scripts for cluster-specific requirements
 
-# 4. After completion, compute ΔΔG
+# 4. Submit without regenerating files
+python fep_runner.py submit --mode local
+
+# 5. After completion, compute ΔΔG
 python fep_runner.py analyse
 ```
 
@@ -89,12 +142,19 @@ amber:
 
 slurm:
   gpu:
+    time: "24:00:00"
     ntasks: 1
     gres: gpu:1
     partition: partition_name
-    qos: qos_name
+    # Any key here is written verbatim as #SBATCH --key=value.
+    # Add qos, account, mem, etc. without editing fep_runner.py.
   cpu:
-    ntasks: 4         # must match -n passed to srun pmemd.MPI
+    ntasks: 4         # substituted into execution_command.cpu below
+
+execution_command:
+  gpu: "srun $AMBERHOME/bin/pmemd.cuda"
+  # {ntasks} is replaced automatically with slurm.cpu.ntasks.
+  cpu: "srun -n {ntasks} $AMBERHOME/bin/pmemd.MPI"
 
 simulation:
   min:
@@ -140,8 +200,10 @@ unbounded and bounded systems inside `setup_files/<resnew>_to_<resold>/`.
 # Generate input files
 python fep_runner.py setup --mode local
 
+# (optional) edit run_local.sh scripts
+
 # Launch (both legs chain sequentially in background)
-python fep_runner.py setup --mode local --submit
+python fep_runner.py submit --mode local
 
 # Monitor
 tail -f LCN_to_ACN/unbounded/run.log
@@ -155,17 +217,24 @@ is never double-booked. Each `run_local.sh` runs minimisation → equilibration
 ### serial — SLURM, one job at a time
 
 ```bash
-python fep_runner.py setup --mode serial --submit
+# Generate scripts
+python fep_runner.py setup --mode serial
+
+# (optional) edit FEP_MIN.cmd / FEP_EQUIL.cmd / FEP_PROD_*.cmd
+
+# Submit
+python fep_runner.py submit --mode serial
 ```
 
-Jobs chain via `sbatch` dependencies: equil → window-mid → mid-1 → … → 1 →
+Jobs chain via `sbatch`: equil → window-mid → mid-1 → … → 1 →
 mid+1 → … → N. Replicas are chained end-to-end (replica 2 starts when
 replica 1's last window finishes).
 
 ### parallel — SLURM, all replicas simultaneously
 
 ```bash
-python fep_runner.py setup --mode parallel --submit
+python fep_runner.py setup --mode parallel
+python fep_runner.py submit --mode parallel
 ```
 
 After equilibration, every replica's central window is submitted at once.
@@ -227,5 +296,12 @@ bash clean.sh --yes      # skip confirmation
 
 ```
 python fep_runner.py [--config FILE] setup   [--mode {local,serial,parallel}] [--submit]
+python fep_runner.py [--config FILE] submit  [--mode {local,serial,parallel}]
 python fep_runner.py [--config FILE] analyse [--tail N]
 ```
+
+| Command | Description |
+|---|---|
+| `setup` | Generate all input files and SLURM/local job scripts. Pass `--submit` to also launch immediately after generation. |
+| `submit` | Submit existing job scripts without regenerating any files. Use this after manually editing the generated scripts for cluster-specific requirements. `--mode` must match the mode used during setup. |
+| `analyse` | Read all `.en` energy files, extract dV/dλ, and compute ΔΔG. |

@@ -165,3 +165,81 @@ def test_unbounded_masks_correct(generated, mask_key, expected):
     assert ti.exists()
     val = _extract_param(ti.read_text(), mask_key)
     assert val == expected, f"Unbounded [{mask_key}]: got {val!r}, expected {expected!r}"
+
+
+# ---------------------------------------------------------------------------
+# Fixture — serial mode (SLURM scripts, no submission)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def generated_serial(tmp_path_factory):
+    """Run setup --mode serial once; return the tmp directory."""
+    tmp = tmp_path_factory.mktemp("fep_serial")
+    shutil.copy(REPO_DIR / "config.yaml", tmp / "config.yaml")
+    shutil.copy(REPO_DIR / "fep_runner.py", tmp / "fep_runner.py")
+    result = subprocess.run(
+        [sys.executable, "fep_runner.py", "setup", "--mode", "serial"],
+        cwd=tmp,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"fep_runner.py setup --mode serial failed.\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    return tmp
+
+
+# ---------------------------------------------------------------------------
+# Generic SLURM header — all slurm.gpu keys must appear in FEP_MIN.cmd
+# ---------------------------------------------------------------------------
+
+_gpu_resources = _cfg["slurm"]["gpu"]
+
+
+@pytest.mark.parametrize("key,value", _gpu_resources.items())
+def test_slurm_header_gpu_keys(generated_serial, key, value):
+    """Every key in slurm.gpu must produce a #SBATCH directive in FEP_MIN.cmd."""
+    cmd = (generated_serial / SYSTEM_NAME / "unbounded" / "FEP_MIN.cmd").read_text()
+    assert f"#SBATCH --{key}={value}" in cmd, (
+        f"Expected '#SBATCH --{key}={value}' in FEP_MIN.cmd"
+    )
+
+
+# ---------------------------------------------------------------------------
+# execution_command — GPU command in min and prod scripts
+# ---------------------------------------------------------------------------
+
+_gpu_exec = _cfg["execution_command"]["gpu"]
+_cpu_exec = _cfg["execution_command"]["cpu"].format(
+    ntasks=_cfg["slurm"]["cpu"]["ntasks"]
+)
+
+_mid = (N_WINDOWS + 1) // 2
+_sample_windows = sorted({1, _mid, N_WINDOWS})
+
+
+def test_slurm_min_uses_gpu_execution_command(generated_serial):
+    """FEP_MIN.cmd must contain the gpu execution command from config."""
+    cmd = (generated_serial / SYSTEM_NAME / "unbounded" / "FEP_MIN.cmd").read_text()
+    assert _gpu_exec in cmd, f"Expected '{_gpu_exec}' in FEP_MIN.cmd"
+
+
+@pytest.mark.parametrize("window", _sample_windows)
+def test_slurm_prod_uses_gpu_execution_command(generated_serial, window):
+    """FEP_PROD_N.cmd must contain the gpu execution command from config."""
+    cmd = (
+        generated_serial / SYSTEM_NAME / "unbounded"
+        / "replica_1" / str(window) / f"FEP_PROD_{window}.cmd"
+    ).read_text()
+    assert _gpu_exec in cmd, f"Expected '{_gpu_exec}' in FEP_PROD_{window}.cmd"
+
+
+# ---------------------------------------------------------------------------
+# execution_command — CPU command (with ntasks substitution) in equil script
+# ---------------------------------------------------------------------------
+
+def test_slurm_equil_uses_cpu_execution_command(generated_serial):
+    """FEP_EQUIL.cmd must contain the cpu execution command with ntasks substituted."""
+    cmd = (generated_serial / SYSTEM_NAME / "unbounded" / "FEP_EQUIL.cmd").read_text()
+    assert _cpu_exec in cmd, f"Expected '{_cpu_exec}' in FEP_EQUIL.cmd"
