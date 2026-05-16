@@ -190,6 +190,25 @@ def generated_serial(tmp_path_factory):
     return tmp
 
 
+@pytest.fixture(scope="module")
+def generated_parallel(tmp_path_factory):
+    """Run setup --mode parallel once; return the tmp directory."""
+    tmp = tmp_path_factory.mktemp("fep_parallel")
+    shutil.copy(REPO_DIR / "config.yaml", tmp / "config.yaml")
+    shutil.copy(REPO_DIR / "fep_runner.py", tmp / "fep_runner.py")
+    result = subprocess.run(
+        [sys.executable, "fep_runner.py", "setup", "--mode", "parallel"],
+        cwd=tmp,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"fep_runner.py setup --mode parallel failed.\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    return tmp
+
+
 # ---------------------------------------------------------------------------
 # Generic SLURM header — all slurm.gpu keys must appear in EQUILIBRATION.cmd
 # ---------------------------------------------------------------------------
@@ -207,7 +226,7 @@ def test_slurm_header_gpu_keys(generated_serial, key, value):
 
 
 # ---------------------------------------------------------------------------
-# EQUILIBRATION.cmd — combined min + heating + equil script
+# EQUILIBRATION.cmd — GPU-only, all three stages, all modes
 # ---------------------------------------------------------------------------
 
 _gpu_exec = _cfg["execution_command"]["gpu"]
@@ -219,6 +238,50 @@ _mid = (N_WINDOWS + 1) // 2
 _sample_windows = sorted({1, _mid, N_WINDOWS})
 
 
+@pytest.fixture
+def generated_slurm(request, generated_serial, generated_parallel):
+    return generated_serial if request.param == "serial" else generated_parallel
+
+
+@pytest.mark.parametrize("generated_slurm", ["serial", "parallel"], indirect=True)
+def test_equilibration_cmd_exists(generated_slurm, request):
+    """EQUILIBRATION.cmd must be generated and executable in both SLURM modes."""
+    mode = request.node.callspec.params["generated_slurm"]
+    cmd = generated_slurm / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd"
+    assert cmd.exists(), f"EQUILIBRATION.cmd missing in {mode} mode"
+    assert cmd.stat().st_mode & 0o111, f"EQUILIBRATION.cmd not executable in {mode} mode"
+
+
+@pytest.mark.parametrize("generated_slurm", ["serial", "parallel"], indirect=True)
+def test_equilibration_gpu_only(generated_slurm, request):
+    """EQUILIBRATION.cmd must use only the GPU command — no CPU executor."""
+    mode = request.node.callspec.params["generated_slurm"]
+    content = (generated_slurm / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd").read_text()
+    assert _gpu_exec in content, f"[{mode}] GPU command missing from EQUILIBRATION.cmd"
+    assert _cpu_exec not in content, f"[{mode}] CPU command must not appear in EQUILIBRATION.cmd"
+
+
+@pytest.mark.parametrize("generated_slurm", ["serial", "parallel"], indirect=True)
+@pytest.mark.parametrize("stage", ["min.in", "heating.in", "equil.in"])
+def test_equilibration_contains_all_three_stages(generated_slurm, stage, request):
+    """EQUILIBRATION.cmd must reference min.in, heating.in, and equil.in."""
+    mode = request.node.callspec.params["generated_slurm"]
+    content = (generated_slurm / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd").read_text()
+    assert stage in content, f"[{mode}] EQUILIBRATION.cmd missing {stage}"
+
+
+# local mode: run_local.sh uses GPU only for all three pre-production stages
+
+@pytest.mark.parametrize("system", ["bounded", "unbounded"])
+def test_local_run_script_gpu_only(generated, system):
+    """run_local.sh must not contain CPU_AMBER — all stages run on GPU."""
+    content = (generated / SYSTEM_NAME / system / "run_local.sh").read_text()
+    assert "CPU_AMBER" not in content, f"run_local.sh [{system}] references CPU_AMBER"
+    assert "$AMBER" in content
+
+
+# legacy single-fixture tests kept for compatibility
+
 def test_slurm_equilibration_cmd_exists(generated_serial):
     """EQUILIBRATION.cmd must be generated (replaces the old FEP_MIN/FEP_EQUIL pair)."""
     cmd = generated_serial / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd"
@@ -227,15 +290,9 @@ def test_slurm_equilibration_cmd_exists(generated_serial):
 
 
 def test_slurm_equilibration_contains_gpu_command(generated_serial):
-    """EQUILIBRATION.cmd must use the GPU execution command for min and heating."""
+    """EQUILIBRATION.cmd must use the GPU execution command for all three stages."""
     cmd = (generated_serial / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd").read_text()
     assert _gpu_exec in cmd, f"Expected '{_gpu_exec}' in EQUILIBRATION.cmd"
-
-
-def test_slurm_equilibration_contains_cpu_command(generated_serial):
-    """EQUILIBRATION.cmd must use the CPU execution command for equilibration."""
-    cmd = (generated_serial / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd").read_text()
-    assert _cpu_exec in cmd, f"Expected '{_cpu_exec}' in EQUILIBRATION.cmd"
 
 
 def test_slurm_equilibration_contains_all_three_stages(generated_serial):

@@ -181,11 +181,9 @@ def _equil_cpptraj_params(cfg: dict, n_replicas: int) -> tuple[int, int, int]:
 def _gen_equilibration_cmd(resnew: str, sys_label: str, n_replicas: int,
                             middle: int, cfg: dict, mode: str) -> str:
     resources = cfg["slurm"]["gpu"]
-    n_tasks_cpu = cfg["slurm"]["cpu"]["ntasks"]
     header = _sbatch_header(f"{resnew}-equil-{sys_label}", resources)
     mods = _module_block(cfg["amber"]["cuda_module"])
     gpu_cmd = cfg["execution_command"]["gpu"]
-    cpu_cmd = cfg["execution_command"]["cpu"].format(ntasks=n_tasks_cpu)
     start, end, step = _equil_cpptraj_params(cfg, n_replicas)
 
     lines = [
@@ -199,8 +197,7 @@ def _gen_equilibration_cmd(resnew: str, sys_label: str, n_replicas: int,
         "    -o heating.out -inf heating.info -e heating.en -r heating.rst7 -x heating.nc -l heating.log",
         "",
         "# ---- Equilibration",
-        f"{cpu_cmd} -O \\",
-        "    -i equil.in -c heating.rst7 -p ti.parm7 \\",
+        f"{gpu_cmd} -i equil.in -c heating.rst7 -p ti.parm7 -O \\",
         "    -o equil.out -inf equil.info -e equil.en \\",
         "    -r equil.rst7 -x equil.nc -l equil.log",
         "",
