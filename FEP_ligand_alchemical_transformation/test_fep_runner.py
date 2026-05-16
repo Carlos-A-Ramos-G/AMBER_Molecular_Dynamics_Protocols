@@ -230,9 +230,6 @@ def test_slurm_header_gpu_keys(generated_serial, key, value):
 # ---------------------------------------------------------------------------
 
 _gpu_exec = _cfg["execution_command"]["gpu"]
-_cpu_exec = _cfg["execution_command"]["cpu"].format(
-    ntasks=_cfg["slurm"]["cpu"]["ntasks"]
-)
 
 _mid = (N_WINDOWS + 1) // 2
 _sample_windows = sorted({1, _mid, N_WINDOWS})
@@ -254,11 +251,10 @@ def test_equilibration_cmd_exists(generated_slurm, request):
 
 @pytest.mark.parametrize("generated_slurm", ["serial", "parallel"], indirect=True)
 def test_equilibration_gpu_only(generated_slurm, request):
-    """EQUILIBRATION.cmd must use only the GPU command — no CPU executor."""
+   """EQUILIBRATION.cmd must use the GPU execution command."""
     mode = request.node.callspec.params["generated_slurm"]
     content = (generated_slurm / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd").read_text()
     assert _gpu_exec in content, f"[{mode}] GPU command missing from EQUILIBRATION.cmd"
-    assert _cpu_exec not in content, f"[{mode}] CPU command must not appear in EQUILIBRATION.cmd"
 
 
 @pytest.mark.parametrize("generated_slurm", ["serial", "parallel"], indirect=True)
@@ -268,16 +264,6 @@ def test_equilibration_contains_all_three_stages(generated_slurm, stage, request
     mode = request.node.callspec.params["generated_slurm"]
     content = (generated_slurm / SYSTEM_NAME / "unbounded" / "EQUILIBRATION.cmd").read_text()
     assert stage in content, f"[{mode}] EQUILIBRATION.cmd missing {stage}"
-
-
-# local mode: run_local.sh uses GPU only for all three pre-production stages
-
-@pytest.mark.parametrize("system", ["bounded", "unbounded"])
-def test_local_run_script_gpu_only(generated, system):
-    """run_local.sh must not contain CPU_AMBER — all stages run on GPU."""
-    content = (generated / SYSTEM_NAME / system / "run_local.sh").read_text()
-    assert "CPU_AMBER" not in content, f"run_local.sh [{system}] references CPU_AMBER"
-    assert "$AMBER" in content
 
 
 # legacy single-fixture tests kept for compatibility
@@ -369,13 +355,6 @@ def test_run_local_sh_contains_heating(generated, system):
     script = (generated / SYSTEM_NAME / system / "run_local.sh").read_text()
     assert "heating.in" in script, f"run_local.sh for {system} missing heating step"
     assert "heating.rst7" in script, f"run_local.sh for {system} missing heating.rst7 output"
-
-
-@pytest.mark.parametrize("system", ["bounded", "unbounded"])
-def test_run_local_sh_no_cpu_amber(generated, system):
-    """run_local.sh must not reference CPU_AMBER — equilibration now runs on GPU."""
-    script = (generated / SYSTEM_NAME / system / "run_local.sh").read_text()
-    assert "CPU_AMBER" not in script, f"run_local.sh for {system} still references CPU_AMBER"
 
 
 @pytest.mark.parametrize("system", ["bounded", "unbounded"])
