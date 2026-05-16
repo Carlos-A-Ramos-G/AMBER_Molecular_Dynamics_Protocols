@@ -136,7 +136,6 @@ replicates: 1         # independent replicas
 
 amber:
   cuda_module: amber/24           # SLURM module for GPU runs
-  cpu_module:  amber/24           # SLURM module for CPU equilibration
   cuda_lib_path: /path/to/nvidia-driver-libs  # leave empty if not needed
 
 slurm:
@@ -147,13 +146,9 @@ slurm:
     partition: partition_name
     # Any key here is written verbatim as #SBATCH --key=value.
     # Add qos, account, mem, etc. without editing fep_runner.py.
-  cpu:
-    ntasks: 4         # substituted into execution_command.cpu below
 
 execution_command:
   gpu: "srun $AMBERHOME/bin/pmemd.cuda"
-  # {ntasks} is replaced automatically with slurm.cpu.ntasks.
-  cpu: "srun -n {ntasks} $AMBERHOME/bin/pmemd.MPI"
 
 simulation:
   min:
