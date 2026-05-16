@@ -5,6 +5,13 @@ using AMBER thermodynamic integration (TI) with Gauss-Legendre quadrature.
 Supports three execution modes: **local** (single-GPU workstation), **serial** (SLURM,
 one job at a time), and **parallel** (SLURM, all replicas simultaneously).
 
+This example quantifies the impact on the binding free energy affinity of nirmatrelvir 
+to the main protease of SARS-CoV-2 when the gamalactam ring in position P1 is mutated 
+to a methyl group. 
+
+The full study can be found here:
+- https://pubs.rsc.org/en/content/articlelanding/2021/cc/d1cc03953a
+
 ## Example system: LCN → ACN
 
 ```
